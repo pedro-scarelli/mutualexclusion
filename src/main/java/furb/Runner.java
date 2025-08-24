@@ -23,17 +23,20 @@ public class Runner {
 
     private final Random random = new Random();
 
-    private Coordinator coordinator;
+    private volatile Integer coordinatorId = null;
+
+    private volatile int coordinatorPort = -1;
 
     private int nextPort = 8080;
 
     private int nextNodeId = 1;
 
-
     public void start() throws Exception {
-        coordinator = new Coordinator(nextPort++, nextNodeId++, this);
-
         createNode();
+
+        var firstNode = nodes.get(0);
+        firstNode.promoteToCoordinator();
+        setCoordinator(firstNode.getId(), firstNode.getPort());
 
         scheduler.scheduleAtFixedRate(() -> {
             try { createNode(); } catch (Exception e) { e.printStackTrace(); }
@@ -46,31 +49,48 @@ public class Runner {
 
     private void createNode() throws Exception {
         var port = nextPort++;
-        var newNode = new Node(port, nextNodeId, coordinator);
-        nodes.add(newNode);
+        var id = nextNodeId++;
+        var newNode = new Node(port, id, this);
 
-        System.out.println("Criado node " + nextNodeId + " na porta " + port);
-        nextNodeId++;
+        nodes.add(newNode);
+        nodePorts.put(id, port);
+        System.out.println("| " + id + " | criado na porta " + port);
     }
 
     private synchronized void rotateCoordinator() throws Exception {
         System.out.println("Matando coordenador");
-        if (coordinator != null) coordinator.shutdown();
-
-        var newPort = nextPort++;
-        int newId;
-
-        if (nodes.isEmpty()) {
-            newId = nextNodeId++;
-        } else {
-            Node candidate = nodes.get(random.nextInt(nodes.size()));
-            newId = candidate.getId();
+        if (coordinatorId != null) {
+            killCoordinator();
         }
-        coordinator = new Coordinator(newPort, newId, this);
+        criticalResource.setOccupant(null);
 
-        for (Node node : nodes) node.setCoordinator(coordinator);
+        Node candidate = nodes.get(random.nextInt(nodes.size()));
+        candidate.promoteToCoordinator();
+        setCoordinator(candidate.getId(), candidate.getPort());
 
-        System.out.println("Novo coordenador: " + newId + " na porta " + newPort);
+        System.out.println("Novo coordenador promovido: " + coordinatorId + " na porta " + coordinatorPort);
+    }
+
+    private void killCoordinator() {
+        Node current = findNodeById(coordinatorId);
+        if (current != null) {
+            nodes.remove(current);
+            nodePorts.remove(current.getId());
+            current.shutdown();
+        }
+    }
+
+    private Node findNodeById(int id) {
+        for (Node node : nodes) {
+            if (node.getId() == id) return node;
+        }
+
+        return null;
+    }
+
+    private void setCoordinator(int id, int port) {
+        this.coordinatorId = id;
+        this.coordinatorPort = port;
     }
 
     public int getNodePort(int nodeId) {
