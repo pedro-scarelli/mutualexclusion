@@ -84,9 +84,4 @@ class Node {
             e.printStackTrace();
         }
     }
-
-    public void shutdown() {
-        udpServer.close();
-        sendSocket.close();
-    }
 }
