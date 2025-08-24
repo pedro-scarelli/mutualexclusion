@@ -3,87 +3,77 @@ package furb;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 import lombok.Getter;
 
 @Getter
 public class Runner {
 
-    private int port = 8080;
-
-    private int nextNodeId = 0;
-
-    private CriticalResource criticalResource;
+    private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(4);
 
     private final List<Node> nodes = new ArrayList<>();
 
+    private final ConcurrentHashMap<Integer,Integer> nodePorts = new ConcurrentHashMap<>();
+
+    private final CriticalResource criticalResource = new CriticalResource();
+
+    private final Random random = new Random();
+
     private Coordinator coordinator;
 
+    private int nextPort = 8080;
 
-    public void start() {
-        this.criticalResource = new CriticalResource(null);
-        var firstCoordinator = new Coordinator(port, nextNodeId, this);
-        coordinator = firstCoordinator;
-        incrementPortAndNextNodeIdAndSleep();
+    private int nextNodeId = 1;
 
-        while(true) {
-            var newNode = new Node(port, nextNodeId, firstCoordinator);
-            nodes.add(newNode);
-            incrementPortAndNextNodeIdAndSleep();
-        }
+
+    public void start() throws Exception {
+        coordinator = new Coordinator(nextPort++, nextNodeId++, this);
+
+        createNode();
+
+        scheduler.scheduleAtFixedRate(() -> {
+            try { createNode(); } catch (Exception e) { e.printStackTrace(); }
+        }, 40, 40, TimeUnit.SECONDS);
+
+        scheduler.scheduleAtFixedRate(() -> {
+            try { rotateCoordinator(); } catch (Exception e) { e.printStackTrace(); }
+        }, 60, 60, TimeUnit.SECONDS);
     }
 
-    private void incrementPortAndNextNodeIdAndSleep() {
+    private void createNode() throws Exception {
+        var port = nextPort++;
+        var newNode = new Node(port, nextNodeId, coordinator);
+        nodes.add(newNode);
+
+        System.out.println("Criado node " + nextNodeId + " na porta " + port);
         nextNodeId++;
-        port++;
-        sleepFortySeconds();
-        killCoordinator();
     }
 
-    private void sleepFortySeconds() {
-        try {
-            Thread.sleep(40 * 1000);
-        } catch (InterruptedException i) {
-            System.out.println("Thread interrompida " + i.getMessage());
+    private synchronized void rotateCoordinator() throws Exception {
+        System.out.println("Matando coordenador");
+        if (coordinator != null) coordinator.shutdown();
+
+        var newPort = nextPort++;
+        int newId;
+
+        if (nodes.isEmpty()) {
+            newId = nextNodeId++;
+        } else {
+            Node candidate = nodes.get(random.nextInt(nodes.size()));
+            newId = candidate.getId();
         }
-    }
+        coordinator = new Coordinator(newPort, newId, this);
 
-    private void killCoordinator() {
-        if(nodes.size() == 0) {
-            return;
-        }
+        for (Node node : nodes) node.setCoordinator(coordinator);
 
-        var newCoordinator = decideNewCoordinator();
-        coordinator = new Coordinator(newCoordinator.getPort(), newCoordinator.getId(), this);
-        newCoordinator = null;
-        updateCoordinator(coordinator);
-    }
-
-    private Node decideNewCoordinator() {
-        if(nodes.size() == 1) {
-            return nodes.get(0);
-        }
-
-        var randomGenerator = new Random();
-        var randomIndex = randomGenerator.nextInt(nodes.size());
-
-        return nodes.get(randomIndex);
-
-    }
-
-    private void updateCoordinator(Coordinator coordinator) {
-        for (Node node : nodes) {
-            node.setCoordinator(coordinator);
-        }
+        System.out.println("Novo coordenador: " + newId + " na porta " + newPort);
     }
 
     public int getNodePort(int nodeId) {
-        for (Node node : nodes) {
-            if (node.getId() == nodeId) {
-                return node.getPort();
-            }
-        }
-
-        return 1;
+        return nodePorts.getOrDefault(nodeId, -1);
     }
 }

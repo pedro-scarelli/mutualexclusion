@@ -1,33 +1,52 @@
 package furb;
 
+import java.io.IOException;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.SocketException;
+import java.util.function.Consumer;
 
-public class UDPServer {
-    private DatagramSocket socket;
-    private Thread listenThread;
+class UDPServer {
 
-    public UDPServer(int port) throws Exception {
-        socket = new DatagramSocket(port);
+    private final DatagramSocket socket;
 
-        listenThread = new Thread(this::listen);
-        listenThread.start();
+    private final Thread listenThread;
+
+    private final Consumer<DatagramPacket> onReceive;
+
+
+    public UDPServer(int port, Consumer<DatagramPacket> onReceive) throws SocketException {
+        this.socket = new DatagramSocket(port);
+        this.onReceive = onReceive;
+        this.listenThread = new Thread(this::listenLoop, "udp-listen-" + port);
+        this.listenThread.start();
     }
 
-    private void listen() {
-        byte[] buffer = new byte[1024];
+    private void listenLoop() {
+        byte[] buffer = new byte[2048];
 
-        while (true) {
+        while (!socket.isClosed()) {
             try {
-                DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
-                socket.receive(packet); 
-                String message = new String(packet.getData(), 0, packet.getLength());
-                System.out.println("Recebido: " + message + " de " + packet.getAddress());
-            } catch (Exception e) {
-                e.printStackTrace();
+                var packet = new DatagramPacket(buffer, buffer.length);
+                socket.receive(packet);
+                // passa uma copia do pacote pra evitar racing no buffer
+                byte[] dataCopy = new byte[packet.getLength()];
+                System.arraycopy(packet.getData(), packet.getOffset(), dataCopy, 0, packet.getLength());
+                var safePacket = new DatagramPacket(dataCopy, dataCopy.length, packet.getAddress(), packet.getPort());
+                onReceive.accept(safePacket);
+            } catch (SocketException se) {
                 break;
+            } catch (IOException e) {
+                e.printStackTrace();
             }
         }
+    }
+
+    public void close() {
+        socket.close();
+        try {
+            listenThread.join(500);
+        } catch (InterruptedException ignored) {}
     }
 }
 

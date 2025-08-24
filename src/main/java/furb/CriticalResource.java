@@ -1,14 +1,16 @@
 package furb;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.Setter;
+class CriticalResource {
 
-@Getter
-@Setter
-@AllArgsConstructor
-public class CriticalResource {
+    private Integer occupant = null;
 
-    private Integer occupant;
 
+    public synchronized Integer getOccupant() {
+        return occupant;
+    }
+
+    public synchronized void setOccupant(Integer id) {
+        occupant = id;
+    }
 }
+
