@@ -117,7 +117,7 @@ class Node {
                     // Se o próprio nó é o coordenador
                     if (isSelfRequest(coordinatorPort)) {
                         handleSelfRequest();
-                        return;
+                        continue;
                     }
 
                     // Envia requisição para o coordenador
