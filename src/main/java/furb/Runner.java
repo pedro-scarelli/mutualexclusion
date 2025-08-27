@@ -17,7 +17,7 @@ public class Runner {
 
     private final List<Node> nodes = new ArrayList<>();
 
-    private final ConcurrentHashMap<Integer,Integer> nodePorts = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<Integer, Integer> nodePorts = new ConcurrentHashMap<>();
 
     private final CriticalResource criticalResource = new CriticalResource();
 
@@ -32,38 +32,61 @@ public class Runner {
     private int nextNodeId = 1;
 
     public void start() throws Exception {
+        // Cria o primeiro nó
         createNode();
 
+        // Promove primeiro nó como coordenador inicial
         var firstNode = nodes.get(0);
         firstNode.promoteToCoordinator();
         setCoordinator(firstNode.getId(), firstNode.getPort());
 
+        // Agenda criação periódica de novos nós a cada 40 segundos
         scheduler.scheduleAtFixedRate(() -> {
-            try { createNode(); } catch (Exception e) { e.printStackTrace(); }
+            try {
+                createNode();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }, 40, 40, TimeUnit.SECONDS);
 
+        // Agenda rotação de coordenador
         scheduler.scheduleAtFixedRate(() -> {
-            try { rotateCoordinator(); } catch (Exception e) { e.printStackTrace(); }
+            try {
+                rotateCoordinator();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }, 60, 60, TimeUnit.SECONDS);
     }
 
+    /**
+     * Cria um novo nó no sistema com ID e porta únicos
+     */
     private void createNode() throws Exception {
         var port = nextPort++;
         var id = nextNodeId++;
         var newNode = new Node(port, id, this);
 
+        // Adiciona à estrutura de dados do sistema
         nodes.add(newNode);
         nodePorts.put(id, port);
         System.out.println("| " + id + " | criado na porta " + port);
     }
 
+    /**
+     * Simula falha do coordenador e elege um novo
+     */
     private synchronized void rotateCoordinator() throws Exception {
         System.out.println("Matando coordenador");
+
+        // Remove coordenador atual
         if (coordinatorId != null) {
             killCoordinator();
         }
+        // Limpa estado do recurso crítico
         criticalResource.setOccupant(null);
 
+        // Elege novo coordenador aleatoriamente
         Node candidate = nodes.get(random.nextInt(nodes.size()));
         candidate.promoteToCoordinator();
         setCoordinator(candidate.getId(), candidate.getPort());
@@ -71,6 +94,9 @@ public class Runner {
         System.out.println("Novo coordenador promovido: " + coordinatorId + " na porta " + coordinatorPort);
     }
 
+    /**
+     * Remove coordenador atual do sistema (simula falha permanente)
+     */
     private void killCoordinator() {
         Node current = findNodeById(coordinatorId);
         if (current != null) {
@@ -82,12 +108,16 @@ public class Runner {
 
     private Node findNodeById(int id) {
         for (Node node : nodes) {
-            if (node.getId() == id) return node;
+            if (node.getId() == id)
+                return node;
         }
 
         return null;
     }
 
+    /**
+     * Define qual nó é o coordenador atual
+     */
     private void setCoordinator(int id, int port) {
         this.coordinatorId = id;
         this.coordinatorPort = port;

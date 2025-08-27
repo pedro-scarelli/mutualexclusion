@@ -12,6 +12,12 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Representa um nó no sistema distribuído que compete pelo recurso crítico.
+ * Cada nó pode atuar como cliente (solicitando recurso) ou coordenador
+ * (gerenciando acesso).
+ */
+
 @Getter
 @Setter
 class Node {
@@ -53,31 +59,40 @@ class Node {
 
     private void onPacket(DatagramPacket packet) {
         var message = new String(packet.getData(), 0, packet.getLength(), StandardCharsets.UTF_8).trim();
-        System.out.println("| " + id + " | recebeu: " + message + " de " + packet.getAddress() + ":" + packet.getPort());
+        System.out
+                .println("| " + id + " | recebeu: " + message + " de " + packet.getAddress() + ":" + packet.getPort());
 
+        // Se é coordenador, processa mensagens de controle
         if (isCoordinator) {
             onPacketCoordinator(message);
             return;
         }
 
+        // Se é cliente e recebe CONCESSÃO, pode usar o recurso
         if ("CONCESSAO".equals(message)) {
             startLocalProcessing();
         }
     }
 
+    /**
+     * Processa mensagens recebidas quando atua como coordenador
+     */
     private void onPacketCoordinator(String message) {
         String[] parts = message.split("\\|");
 
-        if (parts.length < 2) return;
+        if (parts.length < 2)
+            return;
         var type = parts[0].trim();
         var sender = parts[1].trim();
 
         int senderId = Integer.parseInt(sender);
         switch (type) {
             case "REQUISICAO":
+                // Nó quer usar o recurso
                 treatUseResourceRequisition(senderId);
                 break;
             case "LIBERACAO":
+                // Nó terminou de usar o recurso
                 treatFree();
                 break;
             default:
@@ -85,18 +100,27 @@ class Node {
         }
     }
 
+    /**
+     * Thread que tenta requisitar o uso do recurso crítico
+     */
     private void requestLoop() {
         while (running) {
             try {
                 Thread.sleep(WAIT_BETWEEN_USE_TRIES_IN_SECONDS * 1000L);
-                if (!running) break;
+                if (!running)
+                    break;
 
+                // Se não está usando o recurso, tenta requisitar
                 if (!usingResource) {
                     int coordinatorPort = runner.getCoordinatorPort();
+
+                    // Se o próprio nó é o coordenador
                     if (isSelfRequest(coordinatorPort)) {
                         handleSelfRequest();
                         return;
                     }
+
+                    // Envia requisição para o coordenador
                     if (coordinatorPort > 0) {
                         sendMessage("REQUISICAO | " + id, coordinatorPort);
                         System.out.println("| " + id + " | enviou REQUISICAO");
@@ -110,23 +134,35 @@ class Node {
         }
     }
 
+    /**
+     * Verifica se a requisição é do próprio nó (quando ele é coordenador)
+     */
     private boolean isSelfRequest(int coordinatorPort) {
         return coordinatorPort == port;
     }
 
+    /**
+     * Libera o recurso crítico após terminar o processamento
+     */
     private void freeResource() {
-        if (!running) return;
+        if (!running)
+            return;
         usingResource = false;
         int coordinatorPort = runner.getCoordinatorPort();
 
+        // Se próprio nó é coordenador, processa diretamente
         if (isSelfRequest(coordinatorPort)) {
             treatFree();
         } else if (coordinatorPort > 0) {
+            // Notifica coordenador que liberou o recurso
             sendMessage("LIBERACAO | " + id, coordinatorPort);
             System.out.println("| " + id + " | liberou o recurso");
         }
     }
 
+    /**
+     * Envia mensagem UDP para outro nó
+     */
     private void sendMessage(String text, int toPort) {
         if (!running || sendSocket.isClosed()) {
             return;
@@ -141,17 +177,25 @@ class Node {
         }
     }
 
+    /**
+     * Inicia o processamento local do recurso crítico
+     * Simula uso do recurso por um tempo determinado
+     */
     private void startLocalProcessing() {
         usingResource = true;
         new Thread(() -> {
             try {
                 System.out.println("| " + id + " | está usando o recurso por " + PROCESSING_TIME_IN_SECONDS + "s");
                 Thread.sleep(PROCESSING_TIME_IN_SECONDS * 1000L);
-                freeResource();
-            } catch (InterruptedException ignored) {}
+                freeResource(); // Libera após o tempo
+            } catch (InterruptedException ignored) {
+            }
         }, "node-process-" + id).start();
     }
 
+    /**
+     * COORDENADOR: Trata requisição de uso do recurso por outro nó
+     */
     public synchronized void treatUseResourceRequisition(int nodeId) {
         Integer occupant = runner.getCriticalResource().getOccupant();
 
@@ -159,16 +203,24 @@ class Node {
         System.out.println("Requisição pra usar o recurso tratada. Fila atual: " + queue);
     }
 
+    /**
+     * COORDENADOR: Trata requisição do próprio nó (auto-requisição)
+     */
     private void handleSelfRequest() {
         Integer occupant = runner.getCriticalResource().getOccupant();
+        // Se recurso ocupado, enfileira a si mesmo
         if (occupant != null) {
             enqueueSelfIfNeeded();
             System.out.println("Requisição pra usar o recurso tratada. Fila atual: " + queue);
             return;
         }
+        // Se livre, inicia processamento imediatamente
         startProcessingForSelf();
     }
 
+    /**
+     * COORDENADOR: Adiciona próprio nó à fila se necessário
+     */
     private void enqueueSelfIfNeeded() {
         if (!queue.contains(id)) {
             queue.add(id);
@@ -176,13 +228,20 @@ class Node {
         }
     }
 
+    /**
+     * COORDENADOR: Inicia processamento para si mesmo
+     */
     private void startProcessingForSelf() {
         runner.getCriticalResource().setOccupant(id);
         System.out.println("Coordinator: iniciando processamento local");
         startLocalProcessing();
     }
 
+    /**
+     * COORDENADOR: Processa requisição de outro nó
+     */
     private void handleOtherRequest(int nodeId, Integer occupant) {
+        // Se recurso ocupado, enfileira o requisitante
         if (occupant != null) {
             if (queue.contains(nodeId)) {
                 System.out.println("Coordinator: " + nodeId + " já está na fila, ignorando");
@@ -193,18 +252,25 @@ class Node {
             return;
         }
 
+        // Se recurso livre, concede imediatamente
         runner.getCriticalResource().setOccupant(nodeId);
         sendConcession(nodeId);
     }
 
+    /**
+     * COORDENADOR: Trata liberação do recurso e atende próximo da fila
+     */
     public synchronized void treatFree() {
-        Integer next = queue.poll();
+        Integer next = queue.poll(); // Remove próximo da fila
+
+        // Se fila vazia, recurso fica livre
         if (next == null) {
             runner.getCriticalResource().setOccupant(null);
             System.out.println("Coordinator: recurso liberado, fila vazia.");
             return;
         }
 
+        // Se próximo é o próprio coordenador
         if (next == this.id) {
             runner.getCriticalResource().setOccupant(next);
             System.out.println("Coordinator: próximo é self -> iniciando processamento local");
@@ -212,10 +278,14 @@ class Node {
             return;
         }
 
+        // Concede recurso ao próximo nó da fila
         runner.getCriticalResource().setOccupant(next);
         sendConcession(next);
     }
 
+    /**
+     * COORDENADOR: Envia mensagem de CONCESSÃO para um nó
+     */
     private void sendConcession(int nodeId) {
         int port = runner.getNodePort(nodeId);
         if (port <= 0) {
@@ -236,13 +306,20 @@ class Node {
         }
     }
 
+    /**
+     * Promove este nó para coordenador do sistema
+     */
     public void promoteToCoordinator() {
-        if (isCoordinator) return;
+        if (isCoordinator)
+            return;
         isCoordinator = true;
-        queue = new ConcurrentLinkedQueue<>();
+        queue = new ConcurrentLinkedQueue<>(); // Inicializa fila de requisiçõe
         System.out.println("| " + id + " | agora é COORDENADOR");
     }
 
+    /**
+     * Encerra o nó, fechando todas as conexões e threads
+     */
     public void shutdown() {
         running = false;
         udpServer.close();
