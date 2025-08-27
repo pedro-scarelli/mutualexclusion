@@ -46,6 +46,7 @@ class Node {
 
     private final int WAIT_BETWEEN_USE_TRIES_IN_SECONDS = 20;
 
+
     public Node(int port, int id, Runner runner) throws Exception {
         this.port = port;
         this.id = id;
@@ -104,21 +105,15 @@ class Node {
      * Thread que tenta requisitar o uso do recurso crítico
      */
     private void requestLoop() {
-        while (running) {
+        while (running && !isCoordinator) {
             try {
                 Thread.sleep(WAIT_BETWEEN_USE_TRIES_IN_SECONDS * 1000L);
-                if (!running)
+                if (!running || isCoordinator)
                     break;
 
                 // Se não está usando o recurso, tenta requisitar
                 if (!usingResource) {
                     int coordinatorPort = runner.getCoordinatorPort();
-
-                    // Se o próprio nó é o coordenador
-                    if (isSelfRequest(coordinatorPort)) {
-                        handleSelfRequest();
-                        continue;
-                    }
 
                     // Envia requisição para o coordenador
                     if (coordinatorPort > 0) {
@@ -135,13 +130,6 @@ class Node {
     }
 
     /**
-     * Verifica se a requisição é do próprio nó (quando ele é coordenador)
-     */
-    private boolean isSelfRequest(int coordinatorPort) {
-        return coordinatorPort == port;
-    }
-
-    /**
      * Libera o recurso crítico após terminar o processamento
      */
     private void freeResource() {
@@ -150,10 +138,7 @@ class Node {
         usingResource = false;
         int coordinatorPort = runner.getCoordinatorPort();
 
-        // Se próprio nó é coordenador, processa diretamente
-        if (isSelfRequest(coordinatorPort)) {
-            treatFree();
-        } else if (coordinatorPort > 0) {
+        if (coordinatorPort > 0) {
             // Notifica coordenador que liberou o recurso
             sendMessage("LIBERACAO | " + id, coordinatorPort);
             System.out.println("| " + id + " | liberou o recurso");
@@ -199,48 +184,14 @@ class Node {
     public synchronized void treatUseResourceRequisition(int nodeId) {
         Integer occupant = runner.getCriticalResource().getOccupant();
 
-        handleOtherRequest(nodeId, occupant);
+        handleRequest(nodeId, occupant);
         System.out.println("Requisição pra usar o recurso tratada. Fila atual: " + queue);
-    }
-
-    /**
-     * COORDENADOR: Trata requisição do próprio nó (auto-requisição)
-     */
-    private void handleSelfRequest() {
-        Integer occupant = runner.getCriticalResource().getOccupant();
-        // Se recurso ocupado, enfileira a si mesmo
-        if (occupant != null) {
-            enqueueSelfIfNeeded();
-            System.out.println("Requisição pra usar o recurso tratada. Fila atual: " + queue);
-            return;
-        }
-        // Se livre, inicia processamento imediatamente
-        startProcessingForSelf();
-    }
-
-    /**
-     * COORDENADOR: Adiciona próprio nó à fila se necessário
-     */
-    private void enqueueSelfIfNeeded() {
-        if (!queue.contains(id)) {
-            queue.add(id);
-            System.out.println("Coordinator: self-request enfileirada (recurso ocupado)");
-        }
-    }
-
-    /**
-     * COORDENADOR: Inicia processamento para si mesmo
-     */
-    private void startProcessingForSelf() {
-        runner.getCriticalResource().setOccupant(id);
-        System.out.println("Coordinator: iniciando processamento local");
-        startLocalProcessing();
     }
 
     /**
      * COORDENADOR: Processa requisição de outro nó
      */
-    private void handleOtherRequest(int nodeId, Integer occupant) {
+    private void handleRequest(int nodeId, Integer occupant) {
         // Se recurso ocupado, enfileira o requisitante
         if (occupant != null) {
             if (queue.contains(nodeId)) {

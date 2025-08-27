@@ -1,9 +1,9 @@
 package furb;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -15,7 +15,7 @@ public class Runner {
 
     private final ScheduledExecutorService scheduler = Executors.newScheduledThreadPool(4);
 
-    private final List<Node> nodes = new ArrayList<>();
+    private final List<Node> nodes = new CopyOnWriteArrayList<>();
 
     private final ConcurrentHashMap<Integer, Integer> nodePorts = new ConcurrentHashMap<>();
 
@@ -30,6 +30,7 @@ public class Runner {
     private int nextPort = 8080;
 
     private int nextNodeId = 1;
+
 
     public void start() throws Exception {
         // Cria o primeiro nó
